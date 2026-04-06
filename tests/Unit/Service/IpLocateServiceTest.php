@@ -40,4 +40,18 @@ class IpLocateServiceTest extends TestCase
         $this->assertSame('Unknown', $service->getCountryByIp('1.2.3.4'));
     }
 
+    public function testGetCountryByIpReturnsUnknownIfCountryMissing(): void
+    {
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('toArray')->willReturn(['some' => 'data']);
+
+        $httpClient = $this->createMock(HttpClientInterface::class);
+        $httpClient->method('request')->willReturn($response);
+
+        $service = new IpLocateService($httpClient);
+
+        $result = $service->getCountryByIp('127.0.0.1');
+
+        $this->assertSame('Unknown', $result);
+    }
 }

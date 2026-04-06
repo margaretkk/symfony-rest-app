@@ -25,7 +25,7 @@ class UserDTOResolver implements ValueResolverInterface
     {
         $type = $argument->getType();
 
-        if (!$type || !str_starts_with($type, 'App\\Dto\\')) {
+        if (!$type || !str_starts_with($type, 'App\Dto')) {
             return [];
         }
 
@@ -39,12 +39,6 @@ class UserDTOResolver implements ValueResolverInterface
         /** @var array<string, mixed> $queryParams */
         $queryParams = $request->query->all();
         $data = array_merge($data, $queryParams);
-
-        $type = $argument->getType();
-
-        if (!$type || !str_starts_with($type, 'App\\Dto\\')) {
-            return [];
-        }
 
         /** @var class-string<object> $type */
         assert(class_exists($type));

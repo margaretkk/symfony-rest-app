@@ -2,11 +2,12 @@
 
 namespace App\Controller;
 
+use App\Document\AbstractUser;
 use App\Document\User;
-use App\DTO\CreateUserDto;
-use App\DTO\UpdateUserDto;
-use App\DTO\UserFilterDto;
-use App\DTO\UserResponseDto;
+use App\Dto\CreateUserDto;
+use App\Dto\UpdateUserDto;
+use App\Dto\UserFilterDto;
+use App\Dto\UserResponseDto;
 use App\Service\UserService;
 use Doctrine\ODM\MongoDB\LockException;
 use Doctrine\ODM\MongoDB\Mapping\MappingException;
@@ -18,7 +19,7 @@ use Symfony\Component\Routing\Attribute\Route;
 use OpenApi\Attributes as OA;
 use Throwable;
 
-class UserController extends AbstractController
+class UserController
 {
     public function __construct(private readonly UserService $userService)
     {
@@ -80,9 +81,9 @@ class UserController extends AbstractController
         /** @var User[] $users */
         $users = $result['data'];
 
-        $data = array_map(fn(User $user) => new UserResponseDto($user->id, $user->name, $user->email), $users);
+        $data = array_map(fn(AbstractUser $user) => new UserResponseDto($user->id, $user->name, $user->email), $users);
 
-        return $this->json([
+        return new JsonResponse([
             'items' => $data,
             'total' => $result['total'],
             'page' => $filterDto->page,
@@ -118,7 +119,7 @@ class UserController extends AbstractController
     {
         $user = $this->userService->getOne($id);
 
-        return $this->json(new UserResponseDto($user->id, $user->name, $user->email));
+        return new JsonResponse(new UserResponseDto($user->id, $user->name, $user->email));
     }
 
     /**
@@ -147,7 +148,7 @@ class UserController extends AbstractController
     {
         $user = $this->userService->create($dto);
 
-        return $this->json([
+        return new JsonResponse([
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
@@ -192,7 +193,7 @@ class UserController extends AbstractController
     {
         $user = $this->userService->update($id, $dto);
 
-        return $this->json([
+        return new JsonResponse([
             'id' => $user->id,
             'name' => $user->getName(),
             'email' => $user->getEmail(),
@@ -246,6 +247,6 @@ class UserController extends AbstractController
     {
         $this->userService->delete($id);
 
-        return $this->json(['message' => 'User deleted successfully']);
+        return new JsonResponse(['message' => 'User deleted successfully']);
     }
 }

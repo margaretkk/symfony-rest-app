@@ -3,9 +3,9 @@
 namespace App\Tests\Unit\Service;
 
 use App\Document\User;
-use App\DTO\CreateUserDto;
-use App\DTO\UpdateUserDto;
-use App\DTO\UserFilterDto;
+use App\Dto\CreateUserDto;
+use App\Dto\UpdateUserDto;
+use App\Dto\UserFilterDto;
 use App\Repository\UserRepositoryInterface;
 use App\Service\IpLocateService;
 use App\Service\UserService;
