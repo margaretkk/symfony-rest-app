@@ -3,131 +3,119 @@
 namespace App\Service;
 
 use AllowDynamicProperties;
+use App\Document\AbstractUser;
 use App\Document\User;
-use App\Repository\UserRepository;
-use Doctrine\ODM\MongoDB\DocumentManager;
-use Doctrine\ODM\MongoDB\MongoDBException;
-use Symfony\Component\Validator\Validator\ValidatorInterface;
-use Symfony\Contracts\HttpClient\HttpClientInterface;
+use App\DTO\CreateUserDto;
+use App\DTO\UpdateUserDto;
+use App\DTO\UserFilterDto;
+use App\Repository\UserRepositoryInterface;
+
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Throwable;
 
 #[AllowDynamicProperties]
 class UserService
 {
-    public function __construct(private DocumentManager    $dm,
-                                private UserRepository     $repository,
-                                private ValidatorInterface $validator,
-                                HttpClientInterface $httpClient
-    ) {
-        $this->httpClient = $httpClient;
-    }
+    public function __construct(private UserRepositoryInterface $repositoryInterface,
+                                private ?IpLocateService        $ipService = null
+    ) {}
+
 
     /**
-     * @throws MongoDBException
+     * @param UserFilterDto $filterDto
+     * @return array{
+     *     data: User[],
+     *     total: int
+     * }
      */
-    public function getUsers(int $page, int $limit, string $sortBy, string $order): array
+    public function getUsers(UserFilterDto $filterDto): array
     {
-        $users = $this->repository->findPaginated($page, $limit, $sortBy, $order);
-        $total = $this->repository->count();
+        $users = $this->repositoryInterface->findPaginated(
+            $filterDto->page ?? 1,
+            $filterDto->limit ?? 10,
+            $filterDto->sortBy ?? 'name',
+            $filterDto->order ?? 'acs'
+        );
+        $total = $this->repositoryInterface->count();
 
         return [
             'data' => $users,
-            'meta' => [
-                'page' => $page,
-                'limit' => $limit,
-                'total' => $total,
-                'sort_by' => $sortBy,
-                'order' => $order
-            ]
+            'total' => $total,
         ];
     }
 
-    public function getOne(string $id): ?User
+    public function getOne(string $id): AbstractUser
     {
-        return $this->repository->findOne($id);
+        $user = $this->repositoryInterface->find($id);
+
+        if ($user === null) {
+            throw new NotFoundHttpException(
+                "User not found"
+            );
+        }
+        return $user;
     }
 
     /**
      * @throws Throwable
-     * @throws MongoDBException
      */
-    public function create(array $data, string $ip): User
+    public function create(CreateUserDto $dto): AbstractUser
     {
         $user = new User();
-        $user->setName($data['name'] ?? '');
-        $user->setEmail($data['email'] ?? '');
+        $user->setName($dto->name);
+        $user->setEmail($dto->email);
+        $user->setIp($dto->ip);
 
-        $user->setIp($ip);
-        $user->setCountry($this->getCountryByIp($ip));
-
-        $errors = $this->validator->validate($user);
-        if (count($errors) > 0) {
-            throw new \RuntimeException((string)$errors);
+        if ($this->ipService !== null) {
+            $user->setCountry($this->ipService->getCountryByIp($dto->ip));
+        } else {
+            $user->setCountry('Unknown');
         }
 
-        $this->dm->persist($user);
-        $this->dm->flush();
+        $this->repositoryInterface->save($user);
 
         return $user;
     }
 
     /**
      * @throws Throwable
-     * @throws MongoDBException
      */
-    public function update(string $id, array $data, string $ip): User
+    public function update(string $id, UpdateUserDto $dto): AbstractUser
     {
-        $user = $this->dm->getRepository(User::class)->find($id);
+        $user = $this->repositoryInterface->find($id);
 
-        if (!$user) {
-            throw new \InvalidArgumentException('User not found');
+        if ($user === null) {
+            throw new NotFoundHttpException(
+                "User not found"
+            );
         }
 
-        $user->setName($data['name'] ?? $user->getName());
-        $user->setEmail($data['email'] ?? $user->getEmail());
+        if ($dto->name !== null) $user->setName($dto->name);
+        if ($dto->email !== null) $user->setEmail($dto->email);
 
-        $user->setIp($ip);
-        $user->setCountry($this->getCountryByIp($ip));
-
-        $errors = $this->validator->validate($user);
-        if (count($errors) > 0) {
-            throw new \RuntimeException((string)$errors);
+        if ($dto->ip !== null && $this->ipService !== null) {
+            $user->setIp($dto->ip);
+            $user->setCountry($this->ipService->getCountryByIp($dto->ip));
         }
 
-        $this->dm->flush();
+        $this->repositoryInterface->save($user);
 
         return $user;
     }
 
     /**
      * @throws Throwable
-     * @throws MongoDBException
      */
     public function delete(string $id): void
     {
-        $user = $this->dm->getRepository(User::class)->find($id);
+        $user = $this->repositoryInterface->find($id);
 
-        if (!$user) {
-            throw new \InvalidArgumentException('User not found');
-        }
-        $this->dm->remove($user);
-        $this->dm->flush();
-    }
-
-    private function getCountryByIp(?string $ip): string
-    {
-        if (!$ip) return 'Unknown';
-
-        try {
-            $response = $this->httpClient->request(
-                'GET',
-                "https://www.iplocate.io/api/lookup/$ip"
+        if ($user === null) {
+            throw new NotFoundHttpException(
+                "User not found"
             );
-
-            $data = $response->toArray();
-            return $data['country'] ?? 'Unknown';
-        } catch (\Throwable $e) {
-            return 'Unknown';
         }
+
+        $this->repositoryInterface->delete($user);
     }
 }

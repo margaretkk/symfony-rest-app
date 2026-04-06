@@ -2,87 +2,92 @@
 
 namespace App\Controller;
 
+use App\Document\User;
+use App\DTO\CreateUserDto;
+use App\DTO\UpdateUserDto;
+use App\DTO\UserFilterDto;
+use App\DTO\UserResponseDto;
 use App\Service\UserService;
 use Doctrine\ODM\MongoDB\LockException;
 use Doctrine\ODM\MongoDB\Mapping\MappingException;
 use Doctrine\ODM\MongoDB\MongoDBException;
+use Nelmio\ApiDocBundle\Attribute\Model;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
 use OpenApi\Attributes as OA;
 use Throwable;
 
 class UserController extends AbstractController
 {
-    public function __construct(private readonly UserService $userService,) {}
+    public function __construct(private readonly UserService $userService)
+    {
+    }
 
-    /**
-     * @throws MongoDBException
-     */
     #[OA\Get(
         path: "/api/users",
         description: "List of users with pagination and sorting",
         summary: "Get users list",
         parameters: [
             new OA\Parameter(
-                name: "page",
-                description: "Page number from 1",
-                in: "query",
+                name: 'sort_by',
+                description: 'Search term',
+                in: 'query',
                 required: false,
-                schema: new OA\Schema(type: "integer", default: 1)
+                schema: new OA\Schema(type: 'string', example: 'John')
             ),
             new OA\Parameter(
-                name: "limit",
-                description: "Users number on page, 50 max",
-                in: "query",
+                name: 'order',
+                description: 'Sort order: asc or desc',
+                in: 'query',
                 required: false,
-                schema: new OA\Schema(type: "integer", default: 10)
+                schema: new OA\Schema(type: 'string', example: 'asc')
             ),
             new OA\Parameter(
-                name: "sort_by",
-                description: "Sort field (name or email)",
-                in: "query",
+                name: 'page',
+                description: 'Page number',
+                in: 'query',
                 required: false,
-                schema: new OA\Schema(type: "string", default: "name")
+                schema: new OA\Schema(type: 'integer', example: 1)
             ),
             new OA\Parameter(
-                name: "order",
-                description: "Sort order: asc or desc",
-                in: "query",
+                name: 'limit',
+                description: 'Items per page',
+                in: 'query',
                 required: false,
-                schema: new OA\Schema(type: "string", default: "asc")
-            )
+                schema: new OA\Schema(type: 'integer', example: 20)
+            ),
         ],
         responses: [
             new OA\Response(
                 response: 200,
-                description: "Users list",
+                description: 'List of users',
                 content: new OA\JsonContent(
-                    type: "array",
-                    items: new OA\Items(
-                        properties: [
-                            new OA\Property(property: "id", description: "User ID", type: "string"),
-                            new OA\Property(property: "name", description: "User name", type: "string"),
-                            new OA\Property(property: "email", description: "User email", type: "string")
-                        ]
-                    )
+                    properties: [
+                        new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/UserResponseDto')),
+                        new OA\Property(property: 'total', type: 'integer'),
+                    ],
+                    type: 'object'
                 )
             )
         ]
     )]
     #[Route('/api/users', methods: ['GET'])]
-    public function list(Request $request): JsonResponse
+    public function list(UserFilterDto $filterDto): JsonResponse
     {
-        $page = max(1, (int)$request->query->get('page', 1));
-        $limit = min(50, (int)$request->query->get('limit', 10));
+        $result = $this->userService->getUsers($filterDto);
 
-        $sortBy = $request->query->get('sort_by', 'name');
-        $order = $request->query->get('order', 'asc');
+        /** @var User[] $users */
+        $users = $result['data'];
 
-        $result = $this->userService->getUsers($page, $limit, $sortBy, $order);
+        $data = array_map(fn(User $user) => new UserResponseDto($user->id, $user->name, $user->email), $users);
 
-        return $this->json($result);
+        return $this->json([
+            'items' => $data,
+            'total' => $result['total'],
+            'page' => $filterDto->page,
+            'limit' => $filterDto->limit
+        ]);
     }
 
     #[Route('/api/users/{id}', methods: ['GET'])]
@@ -102,39 +107,24 @@ class UserController extends AbstractController
         responses: [
             new OA\Response(
                 response: 200,
-                description: "User has been found.",
-                content: new OA\JsonContent(
-                    properties: [
-                        new OA\Property(property: "id", type: "string"),
-                        new OA\Property(property: "name", type: "string"),
-                        new OA\Property(property: "email", type: "string")
-                    ],
-                    type: "object"
-                )
+                description: "User found",
+                content: new OA\JsonContent(ref: UserResponseDto::class)
             ),
-            new OA\Response(
-                response: 404,
-                description: "User not found.",
-                content: new OA\JsonContent(
-                    properties: [
-                        new OA\Property(property: "error", type: "string")
-                    ],
-                    type: "object"
-                )
-            )
+            new OA\Response(response: 404, description: "User not found")
         ]
+
     )]
     public function getOne(string $id): JsonResponse
     {
         $user = $this->userService->getOne($id);
 
-        if (!$user) {
-            return $this->json(['error' => 'User not found'], 404);
-        }
-
-        return $this->json($user);
+        return $this->json(new UserResponseDto($user->id, $user->name, $user->email));
     }
 
+    /**
+     * @throws Throwable
+     * @throws MongoDBException
+     */
     #[Route('/api/users', methods: ['POST'])]
     #[OA\Post(
         path: "/api/users",
@@ -143,56 +133,25 @@ class UserController extends AbstractController
         requestBody: new OA\RequestBody(
             description: "Data fot new user",
             required: true,
-            content: new OA\JsonContent(
-                required: ["name", "email"],
-                properties: [
-                    new OA\Property(property: "name", type: "string", example: "John Doe"),
-                    new OA\Property(property: "email", type: "string", format: "email", example: "john@example.com")
-                ],
-                type: "object"
-            )
+            content: new OA\JsonContent(ref: new Model(type: CreateUserDto::class))
         ),
         responses: [
             new OA\Response(
-                response: 201,
-                description: "User created successfully.",
-                content: new OA\JsonContent(
-                    properties: [
-                        new OA\Property(property: "id", type: "string"),
-                        new OA\Property(property: "name", type: "string"),
-                        new OA\Property(property: "email", type: "string")
-                    ],
-                    type: "object"
-                )
-            ),
-            new OA\Response(
-                response: 400,
-                description: "User creating failed",
-                content: new OA\JsonContent(
-                    properties: [
-                        new OA\Property(property: "error", type: "string")
-                    ],
-                    type: "object"
-                )
-            ),
+                response: 200,
+                description: 'User created successfully',
+                content: new OA\JsonContent(ref: new Model(type: UserResponseDto::class))
+            )
         ]
     )]
-    public function create(Request $request): JsonResponse
+    public function create(CreateUserDto $dto): JsonResponse
     {
-        $data = json_decode($request->getContent(), true);
-        $ip = $request->getClientIp() ?? '0.0.0.0';
+        $user = $this->userService->create($dto);
 
-        try {
-            $user = $this->userService->create($data, $ip);
-
-            return $this->json([
-                'id' => (string)$user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-            ], 201);
-        } catch (MongoDBException|Throwable $e) {
-            return $this->json(['error' => 'User creation failed',], 400);
-        }
+        return $this->json([
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+        ], 201);
     }
 
     /**
@@ -207,15 +166,9 @@ class UserController extends AbstractController
         description: "Updated user data.",
         summary: "Update existing user data.",
         requestBody: new OA\RequestBody(
-            description: "Data for update existing user data.",
+            description: "Data fot new user",
             required: true,
-            content: new OA\JsonContent(
-                properties: [
-                    new OA\Property(property: "name", type: "string", example: "John Updated"),
-                    new OA\Property(property: "email", type: "string", format: "email", example: "updated@example.com")
-                ],
-                type: "object"
-            )
+            content: new OA\JsonContent(ref: new Model(type: UpdateUserDto::class))
         ),
         parameters: [
             new OA\Parameter(
@@ -229,55 +182,21 @@ class UserController extends AbstractController
         responses: [
             new OA\Response(
                 response: 200,
-                description: "User successfully updated.",
-                content: new OA\JsonContent(
-                    properties: [
-                        new OA\Property(property: "id", type: "string"),
-                        new OA\Property(property: "name", type: "string"),
-                        new OA\Property(property: "email", type: "string")
-                    ],
-                    type: "object"
-                )
+                description: 'User created successfully',
+                content: new OA\JsonContent(ref: new Model(type: UserResponseDto::class))
             ),
-            new OA\Response(
-                response: 400,
-                description: "Validation failure or not acceptable data",
-                content: new OA\JsonContent(
-                    properties: [
-                        new OA\Property(property: "error", type: "string")
-                    ],
-                    type: "object"
-                )
-            ),
-            new OA\Response(
-                response: 404,
-                description: "User not found.",
-                content: new OA\JsonContent(
-                    properties: [
-                        new OA\Property(property: "error", type: "string")
-                    ],
-                    type: "object"
-                )
-            )
+            new OA\Response(response: 404, description: "User not found")
         ]
     )]
-    public function update(string $id, Request $request): JsonResponse
+    public function update(string $id, UpdateUserDto $dto): JsonResponse
     {
-        $data = json_decode($request->getContent(), true);
-        $ip = $request->getClientIp() ?? '0.0.0.0';
-        try {
-            $user = $this->userService->update($id, $data, $ip);
+        $user = $this->userService->update($id, $dto);
 
-            return $this->json([
-                'id' => (string)$user->id,
-                'name' => $user->getName(),
-                'email' => $user->getEmail(),
-            ]);
-        } catch (\InvalidArgumentException $e) {
-            return $this->json(['error' => $e->getMessage()], 404);
-        } catch (\RuntimeException $e) {
-            return $this->json(['error' => $e->getMessage()], 400);
-        }
+        return $this->json([
+            'id' => $user->id,
+            'name' => $user->getName(),
+            'email' => $user->getEmail(),
+        ]);
     }
 
     /**
@@ -312,16 +231,6 @@ class UserController extends AbstractController
                 )
             ),
             new OA\Response(
-                response: 400,
-                description: "Error when deleting user.",
-                content: new OA\JsonContent(
-                    properties: [
-                        new OA\Property(property: "error", type: "string")
-                    ],
-                    type: "object"
-                )
-            ),
-            new OA\Response(
                 response: 404,
                 description: "User not found.",
                 content: new OA\JsonContent(
@@ -335,14 +244,8 @@ class UserController extends AbstractController
     )]
     public function delete(string $id): JsonResponse
     {
-        try {
-            $this->userService->delete($id);
+        $this->userService->delete($id);
 
-            return $this->json(['message' => 'Deleted']);
-        } catch (\InvalidArgumentException $e) {
-            return $this->json(['error' => $e->getMessage()], 404);
-        } catch (\RuntimeException $e) {
-            return $this->json(['error' => $e->getMessage()], 400);
-        }
+        return $this->json(['message' => 'User deleted successfully']);
     }
 }

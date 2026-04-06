@@ -13,3 +13,7 @@
 /.env.dev
 /.env
 /.env.test
+
+###> phpstan/phpstan ###
+phpstan.neon
+###< phpstan/phpstan ###
